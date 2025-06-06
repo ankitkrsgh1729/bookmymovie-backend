@@ -4,6 +4,7 @@ import com.bookmymovie.security.JwtAuthenticationFilter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -19,6 +20,7 @@ import java.util.Arrays;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity(prePostEnabled = true)
 public class SecurityConfig {
 
     @Autowired
@@ -45,7 +47,7 @@ public class SecurityConfig {
                         // User endpoints
                         .requestMatchers("/users/profile").hasAnyRole("USER", "ADMIN")
                         .requestMatchers("/bookings/**").hasAnyRole("USER", "ADMIN")
-                        .requestMatchers("/movies/**").permitAll() // Movies can be viewed by everyone
+                        .requestMatchers("/movies/**").authenticated() // Movies can be viewed by everyone
                         .requestMatchers("/theaters/**").permitAll() // Theater info can be viewed by everyone
 
                         // All other requests need authentication

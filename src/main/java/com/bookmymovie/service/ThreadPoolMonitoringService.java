@@ -25,7 +25,7 @@ public class ThreadPoolMonitoringService {
     @Qualifier("profileExecutor")
     private ThreadPoolTaskExecutor profileExecutor;
 
-    @Scheduled(fixedRate = 10000) // Every 10 seconds during load testing
+    @Scheduled(fixedRate = 100000) // Every 10 seconds during load testing
     public void logThreadPoolStats() {
         log.info("=== THREAD POOL MONITORING ===");
 

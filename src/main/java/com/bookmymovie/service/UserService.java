@@ -41,35 +41,9 @@ public class UserService {
     @Autowired
     private ApplicationEventPublisher eventPublisher;
 
-//    // User Registration
-//    public UserResponseDto registerUser(UserRegistrationDto request) {
-//        // Validation
-//        if (userRepository.existsByEmail(request.getEmail())) {
-//            throw new UserAlreadyExistsException("Email already registered");
-//        }
-//
-//        if (userRepository.existsByPhoneNumber(request.getPhoneNumber())) {
-//            throw new UserAlreadyExistsException("Phone number already registered");
-//        }
-//
-//        // Create user entity
-//        User user = User.builder()
-//                .email(request.getEmail())
-//                .password(passwordEncoder.encode(request.getPassword()))
-//                .firstName(request.getFirstName())
-//                .lastName(request.getLastName())
-//                .phoneNumber(request.getPhoneNumber())
-//                .role(UserConstant.UserRole.USER)
-//                .isActive(true)
-//                .build();
-//
-//        User savedUser = userRepository.save(user);
-//        return UserResponseDto.fromEntity(savedUser);
-//    }
-
     // Modify your registerUser method:
     @Transactional
-    public UserResponseDto registerUser(UserRegistrationDto request, String ipAddress) {
+    public UserResponseDto registerUserWithRole(UserRegistrationDto request, String ipAddress, UserConstant.UserRole role ) {
 
         // Step 1: Rate limiting checks
         rateLimitingService.checkIpRateLimit(ipAddress);
@@ -94,7 +68,7 @@ public class UserService {
             user.setFirstName(request.getFirstName().trim());
             user.setLastName(request.getLastName().trim());
             user.setPhoneNumber(request.getPhoneNumber().trim());
-            user.setRole(UserConstant.UserRole.USER);
+            user.setRole(role);
             user.setCreatedAt(LocalDateTime.now());
             user.setIpAddress(ipAddress);
 

@@ -161,4 +161,79 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }
+
+
+    @ExceptionHandler(TheaterNotFoundException.class)
+    public ResponseEntity<ApiResponse<Object>> handleTheaterNotFound(TheaterNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(TheaterAlreadyExistsException.class)
+    public ResponseEntity<ApiResponse<Object>> handleTheaterAlreadyExists(TheaterAlreadyExistsException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(TheaterValidationException.class)
+    public ResponseEntity<ApiResponse<Object>> handleTheaterValidation(TheaterValidationException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(ScreenNotFoundException.class)
+    public ResponseEntity<ApiResponse<Object>> handleScreenNotFound(ScreenNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(ScreenAlreadyExistsException.class)
+    public ResponseEntity<ApiResponse<Object>> handleScreenAlreadyExists(ScreenAlreadyExistsException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(SeatNotFoundException.class)
+    public ResponseEntity<ApiResponse<Object>> handleSeatNotFound(SeatNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(SeatLayoutAlreadyExistsException.class)
+    public ResponseEntity<ApiResponse<Object>> handleSeatLayoutExists(SeatLayoutAlreadyExistsException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(SeatNotAvailableException.class)
+    public ResponseEntity<ApiResponse<Object>> handleSeatNotAvailable(SeatNotAvailableException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(ShowSchedulingConflictException.class)
+    public ResponseEntity<ApiResponse<Object>> handleShowSchedulingConflict(ShowSchedulingConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidLocationException.class)
+    public ResponseEntity<ApiResponse<Object>> handleInvalidLocation(InvalidLocationException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(ConcurrentModificationException.class)
+    public ResponseEntity<ApiResponse<Object>> handleConcurrentModification(ConcurrentModificationException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    // Generic theater exception handler
+    @ExceptionHandler(TheaterException.class)
+    public ResponseEntity<ApiResponse<Object>> handleGenericTheaterException(TheaterException ex) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(ApiResponse.error("Theater service error: " + ex.getMessage()));
+    }
+
 }
