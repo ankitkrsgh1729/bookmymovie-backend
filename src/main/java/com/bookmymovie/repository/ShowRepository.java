@@ -10,163 +10,244 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface ShowRepository extends JpaRepository<Show, Long> {
 
-    // Basic queries
-    List<Show> findByScreenScreenIdAndShowDateAndDeletedFalse(Long screenId, LocalDate showDate);
+    // ==================== BASIC QUERIES ====================
 
-    List<Show> findByMovieMovieIdAndShowDateAndDeletedFalse(Long movieId, LocalDate showDate);
+    List<Show> findByMovieMovieIdAndShowDateOrderByShowTime(Long movieId, LocalDate showDate);
 
-    Page<Show> findByShowDateBetweenAndStatusAndDeletedFalse(
-            LocalDate startDate, LocalDate endDate, Show.ShowStatus status, Pageable pageable);
+    List<Show> findByScreenScreenIdAndShowDateOrderByShowTime(Long screenId, LocalDate showDate);
 
-    // Screen availability for scheduling
+    Page<Show> findByMovieMovieIdAndShowDateBetweenOrderByShowDateAscShowTimeAsc(
+            Long movieId, LocalDate startDate, LocalDate endDate, Pageable pageable);
+
+    List<Show> findByScreenTheaterTheaterIdAndShowDateOrderByShowTime(Long theaterId, LocalDate showDate);
+
+    // ==================== CONFLICT DETECTION ====================
+
     @Query("SELECT s FROM Show s WHERE s.screen.screenId = :screenId " +
-            "AND s.showDate = :showDate AND s.status IN ('SCHEDULED', 'RUNNING') " +
-            "AND s.deleted = false ORDER BY s.showTime")
-    List<Show> findScheduledShowsByScreenAndDate(
-            @Param("screenId") Long screenId, @Param("showDate") LocalDate showDate);
-
-    // Check for overlapping shows
-    @Query("SELECT COUNT(s) > 0 FROM Show s WHERE s.screen.screenId = :screenId " +
-            "AND s.showDate = :showDate AND s.status IN ('SCHEDULED', 'RUNNING') " +
-            "AND s.deleted = false " +
-            "AND ((s.showTime <= :endTime AND s.endTime >= :startTime))")
-    boolean existsOverlappingShow(
+            "AND s.showDate = :showDate " +
+            "AND s.status IN ('SCHEDULED', 'ONGOING') " +
+            "AND ((s.showDateTime <= :endTime AND s.endTime >= :startTime))")
+    List<Show> findConflictingShows(
             @Param("screenId") Long screenId,
             @Param("showDate") LocalDate showDate,
-            @Param("startTime") LocalTime startTime,
-            @Param("endTime") LocalTime endTime);
+            @Param("startTime") LocalDateTime startTime,
+            @Param("endTime") LocalDateTime endTime);
 
-    // Movie and theater combinations
-    @Query("SELECT DISTINCT s.screen.theater FROM Show s " +
-            "WHERE s.movie.movieId = :movieId AND s.showDate = :showDate " +
-            "AND s.status = 'SCHEDULED' AND s.deleted = false")
-    List<Theater> findTheatersByMovieAndDate(
-            @Param("movieId") Long movieId, @Param("showDate") LocalDate showDate);
+    @Query("SELECT s FROM Show s WHERE s.screen.screenId = :screenId " +
+            "AND s.showDate = :showDate " +
+            "AND s.status = 'SCHEDULED' " +
+            "AND s.showId != :excludeShowId " +
+            "AND ((s.showDateTime <= :endTime AND s.endTime >= :startTime))")
+    List<Show> findConflictingShowsExcluding(
+            @Param("screenId") Long screenId,
+            @Param("showDate") LocalDate showDate,
+            @Param("startTime") LocalDateTime startTime,
+            @Param("endTime") LocalDateTime endTime,
+            @Param("excludeShowId") Long excludeShowId);
+
+    // ==================== SEARCH & FILTERING ====================
 
     @Query("SELECT s FROM Show s WHERE s.movie.movieId = :movieId " +
-            "AND s.screen.theater.city = :city AND s.showDate = :showDate " +
-            "AND s.status = 'SCHEDULED' AND s.deleted = false " +
+            "AND s.screen.theater.city = :city " +
+            "AND s.showDate = :showDate " +
+            "AND s.status = 'SCHEDULED' " +
             "ORDER BY s.showTime")
-    List<Show> findShowsByMovieCityAndDate(
+    List<Show> findShowsByMovieAndCityAndDate(
             @Param("movieId") Long movieId,
             @Param("city") String city,
             @Param("showDate") LocalDate showDate);
 
-    // Booking availability
-    @Query("SELECT s FROM Show s WHERE s.availableSeats > 0 " +
-            "AND s.status = 'SCHEDULED' AND s.deleted = false " +
-            "AND s.showDate >= :fromDate ORDER BY s.showDate, s.showTime")
-    List<Show> findAvailableShows(@Param("fromDate") LocalDate fromDate);
+    @Query("SELECT s FROM Show s WHERE s.movie.movieId = :movieId " +
+            "AND s.screen.theater.city = :city " +
+            "AND s.showDate BETWEEN :startDate AND :endDate " +
+            "AND s.status = 'SCHEDULED' " +
+            "ORDER BY s.showDate, s.showTime")
+    List<Show> findShowsByMovieAndCityBetweenDates(
+            @Param("movieId") Long movieId,
+            @Param("city") String city,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
 
-    // Business analytics
-    @Query("SELECT s.showDate, COUNT(s) FROM Show s " +
-            "WHERE s.showDate BETWEEN :startDate AND :endDate " +
-            "AND s.deleted = false GROUP BY s.showDate ORDER BY s.showDate")
-    List<Object[]> getShowCountByDateRange(
-            @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
+    @Query("SELECT s FROM Show s WHERE s.screen.theater.theaterId = :theaterId " +
+            "AND s.showDate BETWEEN :startDate AND :endDate " +
+            "AND s.status IN :statuses " +
+            "ORDER BY s.showDate, s.showTime")
+    List<Show> findShowsByTheaterAndDateRangeAndStatus(
+            @Param("theaterId") Long theaterId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate,
+            @Param("statuses") List<Show.ShowStatus> statuses);
 
-    @Query("SELECT s.movie.title, COUNT(s) FROM Show s " +
-            "WHERE s.showDate BETWEEN :startDate AND :endDate " +
-            "AND s.deleted = false GROUP BY s.movie.movieId, s.movie.title " +
-            "ORDER BY COUNT(s) DESC")
-    List<Object[]> getMostScheduledMovies(
-            @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
-
-    @Query("SELECT AVG(s.bookedSeats * 100.0 / s.screen.totalSeats) FROM Show s " +
-            "WHERE s.showDate BETWEEN :startDate AND :endDate " +
-            "AND s.status = 'COMPLETED' AND s.deleted = false")
-    Double getAverageOccupancyPercentage(
-            @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
-
-    // Pricing analytics
-    @Query("SELECT s.movie.title, AVG(s.basePrice) FROM Show s " +
-            "WHERE s.showDate BETWEEN :startDate AND :endDate " +
-            "AND s.deleted = false GROUP BY s.movie.movieId, s.movie.title")
-    List<Object[]> getAveragePriceByMovie(
-            @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
-
-    // Show timing analysis
-    @Query("SELECT s FROM Show s WHERE s.showTime BETWEEN :startTime AND :endTime " +
-            "AND s.showDate = :showDate AND s.deleted = false ORDER BY s.showTime")
-    List<Show> findShowsByTimeRange(
+    // Geographic search
+    @Query("SELECT s FROM Show s WHERE s.movie.movieId = :movieId " +
+            "AND s.showDate = :showDate " +
+            "AND s.status = 'SCHEDULED' " +
+            "AND s.screen.theater.latitude BETWEEN :minLat AND :maxLat " +
+            "AND s.screen.theater.longitude BETWEEN :minLng AND :maxLng " +
+            "ORDER BY s.showTime")
+    List<Show> findShowsByMovieAndDateNearLocation(
+            @Param("movieId") Long movieId,
             @Param("showDate") LocalDate showDate,
+            @Param("minLat") Double minLat,
+            @Param("maxLat") Double maxLat,
+            @Param("minLng") Double minLng,
+            @Param("maxLng") Double maxLng);
+
+    // ==================== AVAILABILITY QUERIES ====================
+
+    @Query("SELECT s FROM Show s WHERE s.status = 'SCHEDULED' " +
+            "AND s.showDateTime > :currentDateTime " +
+            "AND s.availableSeats > 0 " +
+            "ORDER BY s.showDateTime")
+    List<Show> findAvailableShows(@Param("currentDateTime") LocalDateTime currentDateTime);
+
+    @Query("SELECT s FROM Show s WHERE s.movie.movieId = :movieId " +
+            "AND s.status = 'SCHEDULED' " +
+            "AND s.showDateTime > :currentDateTime " +
+            "AND s.availableSeats >= :requiredSeats " +
+            "ORDER BY s.showDateTime")
+    List<Show> findAvailableShowsForMovie(
+            @Param("movieId") Long movieId,
+            @Param("currentDateTime") LocalDateTime currentDateTime,
+            @Param("requiredSeats") Integer requiredSeats);
+
+    // ==================== TIME-BASED QUERIES ====================
+
+    @Query("SELECT s FROM Show s WHERE s.showDate = :date " +
+            "AND s.showTime BETWEEN :startTime AND :endTime " +
+            "AND s.status = 'SCHEDULED' " +
+            "ORDER BY s.showTime")
+    List<Show> findShowsByTimeSlot(
+            @Param("date") LocalDate date,
             @Param("startTime") LocalTime startTime,
             @Param("endTime") LocalTime endTime);
 
-    // Peak hours analysis (using native SQL for time extraction)
-    @Query(value = "SELECT EXTRACT(HOUR FROM s.show_time) as hour, COUNT(s.*) as show_count " +
-            "FROM shows s " +
-            "WHERE s.show_date BETWEEN :startDate AND :endDate " +
-            "AND s.deleted = false " +
-            "GROUP BY hour " +
-            "ORDER BY hour", nativeQuery = true)
-    List<Object[]> getShowCountByHour(
-            @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
-
-    // Weekend vs weekday analysis (using native SQL for date functions)
-    @Query(value = "SELECT " +
-            "CASE WHEN EXTRACT(DOW FROM s.show_date) IN (0,6) THEN 'WEEKEND' ELSE 'WEEKDAY' END as day_type, " +
-            "COUNT(s.*) as show_count, " +
-            "AVG(s.booked_seats * 100.0 / sc.total_seats) as avg_occupancy " +
-            "FROM shows s " +
-            "JOIN screens sc ON s.screen_id = sc.screen_id " +
-            "WHERE s.show_date BETWEEN :startDate AND :endDate " +
-            "AND s.deleted = false " +
-            "GROUP BY day_type", nativeQuery = true)
-    List<Object[]> getWeekendVsWeekdayAnalysis(
-            @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
-
-    // Upcoming shows for a theater
-    @Query("SELECT s FROM Show s WHERE s.screen.theater.theaterId = :theaterId " +
-            "AND s.showDate >= :fromDate AND s.status = 'SCHEDULED' " +
-            "AND s.deleted = false ORDER BY s.showDate, s.showTime")
-    List<Show> findUpcomingShowsByTheater(
-            @Param("theaterId") Long theaterId, @Param("fromDate") LocalDate fromDate);
-
-    // Current running shows
-    @Query("SELECT s FROM Show s WHERE s.status = 'RUNNING' " +
-            "AND s.deleted = false ORDER BY s.showTime")
-    List<Show> findCurrentlyRunningShows();
-
-    // Shows nearing start time (for notifications)
     @Query("SELECT s FROM Show s WHERE s.status = 'SCHEDULED' " +
-            "AND s.showDate = :today " +
-            "AND s.showTime BETWEEN :currentTime AND :notificationWindow " +
-            "AND s.deleted = false")
-    List<Show> findShowsNearingStart(
-            @Param("today") LocalDate today,
-            @Param("currentTime") LocalTime currentTime,
-            @Param("notificationWindow") LocalTime notificationWindow);
+            "AND s.showDateTime BETWEEN :startDateTime AND :endDateTime " +
+            "ORDER BY s.showDateTime")
+    List<Show> findUpcomingShows(
+            @Param("startDateTime") LocalDateTime startDateTime,
+            @Param("endDateTime") LocalDateTime endDateTime);
 
-    // Housefull shows
-    @Query("SELECT s FROM Show s WHERE s.availableSeats = 0 " +
-            "AND s.status = 'SCHEDULED' AND s.deleted = false " +
-            "ORDER BY s.showDate, s.showTime")
-    List<Show> findHousefullShows();
+    @Query("SELECT s FROM Show s WHERE s.status = 'SCHEDULED' " +
+            "AND s.showDateTime <= :cutoffTime " +
+            "ORDER BY s.showDateTime")
+    List<Show> findShowsStartingSoon(@Param("cutoffTime") LocalDateTime cutoffTime);
 
-    // Show performance metrics
-    @Query("SELECT s.screen.theater.city, s.movie.title, " +
-            "COUNT(s) as totalShows, " +
-            "AVG(s.bookedSeats) as avgBookedSeats, " +
-            "AVG(s.bookedSeats * 100.0 / s.screen.totalSeats) as avgOccupancy " +
+    // ==================== ANALYTICS QUERIES ====================
+
+    @Query("SELECT s.movie.title, COUNT(s), AVG(s.bookedSeats * 100.0 / s.totalSeats) " +
             "FROM Show s WHERE s.showDate BETWEEN :startDate AND :endDate " +
-            "AND s.status = 'COMPLETED' AND s.deleted = false " +
-            "GROUP BY s.screen.theater.city, s.movie.movieId, s.movie.title " +
-            "ORDER BY avgOccupancy DESC")
-    List<Object[]> getShowPerformanceMetrics(
-            @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
+            "AND s.status = 'COMPLETED' " +
+            "GROUP BY s.movie.movieId, s.movie.title " +
+            "ORDER BY COUNT(s) DESC")
+    List<Object[]> getPopularMoviesByShowCount(
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
 
-    // Revenue potential analysis
-    @Query("SELECT s FROM Show s " +
+    @Query("SELECT s.screen.theater.name, COUNT(s), SUM(s.bookedSeats * s.basePrice) " +
+            "FROM Show s WHERE s.showDate BETWEEN :startDate AND :endDate " +
+            "AND s.status = 'COMPLETED' " +
+            "GROUP BY s.screen.theater.theaterId, s.screen.theater.name " +
+            "ORDER BY SUM(s.bookedSeats * s.basePrice) DESC")
+    List<Object[]> getTheaterRevenueAnalysis(
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    @Query(value = "SELECT EXTRACT(HOUR FROM s.show_time) as hour, " +
+            "COUNT(*) as show_count, " +
+            "AVG(s.booked_seats * 100.0 / s.total_seats) as avg_occupancy " +
+            "FROM shows s WHERE s.show_date BETWEEN :startDate AND :endDate " +
+            "AND s.status = 'COMPLETED' " +
+            "GROUP BY EXTRACT(HOUR FROM s.show_time) " +
+            "ORDER BY hour", nativeQuery = true)
+    List<Object[]> getHourlyOccupancyAnalysis(
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    @Query(value = "SELECT CASE WHEN EXTRACT(DOW FROM s.show_date) IN (0,6) " +
+            "THEN 'WEEKEND' ELSE 'WEEKDAY' END as day_type, " +
+            "COUNT(*) as show_count, " +
+            "AVG(s.booked_seats * 100.0 / s.total_seats) as avg_occupancy " +
+            "FROM shows s WHERE s.show_date BETWEEN :startDate AND :endDate " +
+            "AND s.status = 'COMPLETED' " +
+            "GROUP BY day_type", nativeQuery = true)
+    List<Object[]> getWeekdayVsWeekendAnalysis(
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    // ==================== REVENUE QUERIES ====================
+
+    @Query("SELECT SUM(s.bookedSeats * s.basePrice) FROM Show s " +
             "WHERE s.showDate BETWEEN :startDate AND :endDate " +
-            "AND s.deleted = false " +
-            "ORDER BY (s.basePrice * s.screen.totalSeats) DESC")
-    List<Show> findHighRevenueShows(
-            @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
+            "AND s.status = 'COMPLETED'")
+    Optional<Double> getTotalRevenue(
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    @Query("SELECT s.showDate, SUM(s.bookedSeats * s.basePrice) " +
+            "FROM Show s WHERE s.showDate BETWEEN :startDate AND :endDate " +
+            "AND s.status = 'COMPLETED' " +
+            "GROUP BY s.showDate " +
+            "ORDER BY s.showDate")
+    List<Object[]> getDailyRevenue(
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    // ==================== SPECIAL QUERIES ====================
+
+    @Query("SELECT s FROM Show s WHERE s.isPremiere = true " +
+            "AND s.status = 'SCHEDULED' " +
+            "AND s.showDateTime > :currentDateTime " +
+            "ORDER BY s.showDateTime")
+    List<Show> findUpcomingPremieres(@Param("currentDateTime") LocalDateTime currentDateTime);
+
+    @Query("SELECT s FROM Show s WHERE s.isSpecialScreening = true " +
+            "AND s.status = 'SCHEDULED' " +
+            "AND s.showDateTime > :currentDateTime " +
+            "ORDER BY s.showDateTime")
+    List<Show> findSpecialScreenings(@Param("currentDateTime") LocalDateTime currentDateTime);
+
+    @Query("SELECT s FROM Show s WHERE s.availableSeats = 0 " +
+            "AND s.status = 'SCHEDULED' " +
+            "AND s.showDateTime > :currentDateTime")
+    List<Show> findHousefullShows(@Param("currentDateTime") LocalDateTime currentDateTime);
+
+    // ==================== MAINTENANCE QUERIES ====================
+
+    @Query("SELECT s FROM Show s WHERE s.status = 'SCHEDULED' " +
+            "AND s.showDateTime < :cutoffDateTime")
+    List<Show> findExpiredScheduledShows(@Param("cutoffDateTime") LocalDateTime cutoffDateTime);
+
+    @Query("SELECT s FROM Show s WHERE s.status = 'ONGOING' " +
+            "AND s.endTime < :cutoffDateTime")
+    List<Show> findOngoingShowsToComplete(@Param("cutoffDateTime") LocalDateTime cutoffDateTime);
+
+    // ==================== STATISTICS ====================
+
+    @Query("SELECT COUNT(s) FROM Show s WHERE s.showDate = :date AND s.status = 'SCHEDULED'")
+    Long countScheduledShowsByDate(@Param("date") LocalDate date);
+
+    @Query("SELECT AVG(s.bookedSeats * 100.0 / s.totalSeats) FROM Show s " +
+            "WHERE s.showDate BETWEEN :startDate AND :endDate " +
+            "AND s.status = 'COMPLETED'")
+    Optional<Double> getAverageOccupancyRate(
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    @Query("SELECT s.screen.theater.city, COUNT(s) FROM Show s " +
+            "WHERE s.showDate BETWEEN :startDate AND :endDate " +
+            "GROUP BY s.screen.theater.city " +
+            "ORDER BY COUNT(s) DESC")
+    List<Object[]> getShowCountByCity(
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
 }
