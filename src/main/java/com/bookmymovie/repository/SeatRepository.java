@@ -82,4 +82,9 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
 
     boolean existsByScreenScreenIdAndRowLabelIgnoreCaseAndSeatNumberAndDeletedFalse(
             Long screenId, String rowLabel, Integer seatNumber);
+
+    /**
+     * Find all seats for a specific screen ordered by row and seat number
+     */
+    List<Seat> findByScreenScreenIdOrderByRowLabelAscSeatNumberAsc(Long screenId);
 }
