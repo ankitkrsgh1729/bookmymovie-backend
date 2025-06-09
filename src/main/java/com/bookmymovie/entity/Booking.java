@@ -4,7 +4,7 @@ import jakarta.validation.constraints.*;
 import lombok.*;
 import org.hibernate.annotations.SQLDelete;
 import org.hibernate.annotations.Where;
-
+import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -34,6 +34,12 @@ public class Booking extends BaseEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "booking_id")
     private Long bookingId;
+
+    // ADD THIS: Optimistic Locking Version Field
+    @Version
+    @Column(name = "version", nullable = false)
+    @Builder.Default
+    private Long version = 0L;
 
     @NotNull(message = "Booking reference is required")
     @Column(name = "booking_reference", unique = true, nullable = false, length = 20)

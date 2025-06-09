@@ -15,11 +15,11 @@ spring:
   jpa:
     hibernate:
       ddl-auto: update # Use 'create-drop' for development, 'validate' for production
-    show-sql: true
+    show-sql: false
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
-        format_sql: true
+        format_sql: false
 
   # Redis Configuration (for later)
   data:

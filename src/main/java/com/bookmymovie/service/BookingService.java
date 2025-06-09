@@ -19,6 +19,11 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.bookmymovie.service.OptimisticLockingRetryService;
+import com.bookmymovie.service.OptimisticLockingRetryService.BookingConcurrencyException;
+import com.bookmymovie.exception.BookingNotPossibleException;
+import org.springframework.dao.OptimisticLockingFailureException;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
@@ -31,6 +36,7 @@ import java.util.stream.Collectors;
 @Transactional
 public class BookingService {
 
+    private final OptimisticLockingRetryService retryService;
     private final BookingRepository bookingRepository;
     private final ShowRepository showRepository;
     private final SeatRepository seatRepository;
@@ -44,9 +50,126 @@ public class BookingService {
 
     // ==================== CORE BOOKING OPERATIONS ====================
 
+//    public BookingInitiationResponseDto initiateBooking(BookingCreateRequestDto request) {
+//        log.info("Initiating booking for show {} with {} seats", request.getShowId(), request.getSeatIds().size());
+//
+//        try {
+//            // Validate booking request
+//            BookingValidationResponseDto validation = validateBookingRequest(request);
+//            if (!validation.getValid()) {
+//                return BookingInitiationResponseDto.builder()
+//                        .success(false)
+//                        .message("Booking validation failed")
+//                        .errors(validation.getErrors())
+//                        .build();
+//            }
+//
+//            // Load entities
+//            Show show = findShowById(request.getShowId());
+//            User user = findUserById(request.getUserId());
+//            List<Seat> seats = findSeatsByIds(request.getSeatIds());
+//
+//            // Calculate pricing
+//            BookingPricingResponseDto pricing = calculateBookingPricing(
+//                    BookingPricingRequestDto.builder()
+//                            .showId(request.getShowId())
+//                            .seatIds(request.getSeatIds())
+//                            .couponCode(request.getCouponCode())
+//                            .build()
+//            );
+//
+//            // Create booking entity
+//            Booking booking = createBookingEntity(request, show, user, seats, pricing);
+//            booking = bookingRepository.save(booking);
+//
+//            // Reserve seats temporarily
+//            reserveSeats(booking, seats);
+//
+//            log.info("Booking initiated successfully with reference: {}", booking.getBookingReference());
+//
+//            return BookingInitiationResponseDto.builder()
+//                    .success(true)
+//                    .message("Booking initiated successfully")
+//                    .bookingReference(booking.getBookingReference())
+//                    .bookingId(booking.getBookingId())
+//                    .expiryTime(booking.getExpiryTime())
+//                    .timeToExpiryMinutes(booking.getTimeToExpiry())
+//                    .finalAmount(booking.getFinalAmount())
+//                    .build();
+//
+//        } catch (Exception e) {
+//            log.error("Error initiating booking", e);
+//            return BookingInitiationResponseDto.builder()
+//                    .success(false)
+//                    .message("Failed to initiate booking: " + e.getMessage())
+//                    .errors(List.of(e.getMessage()))
+//                    .build();
+//        }
+//    }
+//
+//    public PaymentResponseDto processPayment(PaymentRequestDto request) {
+//        log.info("Processing payment for booking: {}", request.getBookingReference());
+//
+//        Booking booking = findBookingByReference(request.getBookingReference());
+//
+//        // Validate booking state
+//        if (!booking.canBeModified()) {
+//            throw new BookingNotModifiableException("Booking cannot be modified at this time");
+//        }
+//
+//        if (booking.isExpired()) {
+//            booking.expireBooking();
+//            bookingRepository.save(booking);
+//            throw new BookingExpiredException("Booking has expired");
+//        }
+//
+//        // Validate payment amount
+//        if (request.getPaymentAmount().compareTo(booking.getFinalAmount()) != 0) {
+//            throw new InvalidPaymentAmountException("Payment amount does not match booking amount");
+//        }
+//
+//        // Process payment through mock service
+//        PaymentResponseDto paymentResponse = paymentService.processPaymentByMethod(request);
+//
+//        // Update booking with payment result
+//        booking.updatePaymentStatus(
+//                paymentResponse.getPaymentStatus(),
+//                paymentResponse.getPaymentReference(),
+//                paymentResponse.getGatewayResponse()
+//        );
+//
+//        if (paymentResponse.getSuccess()) {
+//            booking.setPaymentMethod(request.getPaymentMethod());
+//            booking.confirmBooking();
+//
+//            // Update show seat count
+//            updateShowSeatCount(booking.getShow(), booking.getNumberOfSeats(), true);
+//
+//            log.info("Payment successful for booking: {}", booking.getBookingReference());
+//        } else {
+//            log.warn("Payment failed for booking: {}", booking.getBookingReference());
+//        }
+//
+//        bookingRepository.save(booking);
+//        return paymentResponse;
+//    }
+//}
+
+    // UPDATED METHOD: Add optimistic locking retry
     public BookingInitiationResponseDto initiateBooking(BookingCreateRequestDto request) {
         log.info("Initiating booking for show {} with {} seats", request.getShowId(), request.getSeatIds().size());
 
+        return retryService.executeWithRetry(() -> {
+            try {
+                return performBookingInitiation(request);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }, "booking-initiation");
+    }
+
+    // EXTRACTED METHOD: Core booking logic (for retry)
+    private BookingInitiationResponseDto performBookingInitiation(BookingCreateRequestDto request) throws InterruptedException {
         try {
             // Validate booking request
             BookingValidationResponseDto validation = validateBookingRequest(request);
@@ -58,10 +181,13 @@ public class BookingService {
                         .build();
             }
 
-            // Load entities
+            // Load entities (this will load current version numbers)
             Show show = findShowById(request.getShowId());
             User user = findUserById(request.getUserId());
             List<Seat> seats = findSeatsByIds(request.getSeatIds());
+
+            // ADD THIS DELAY - TEMPORARY FOR TESTING ONLY
+            Thread.sleep(1000); // 2 second delay to create race condition window
 
             // Calculate pricing
             BookingPricingResponseDto pricing = calculateBookingPricing(
@@ -76,8 +202,8 @@ public class BookingService {
             Booking booking = createBookingEntity(request, show, user, seats, pricing);
             booking = bookingRepository.save(booking);
 
-            // Reserve seats temporarily
-            reserveSeats(booking, seats);
+            // Reserve seats with optimistic locking
+            reserveSeatsWithOptimisticLocking(booking, seats);
 
             log.info("Booking initiated successfully with reference: {}", booking.getBookingReference());
 
@@ -92,18 +218,65 @@ public class BookingService {
                     .build();
 
         } catch (Exception e) {
-            log.error("Error initiating booking", e);
-            return BookingInitiationResponseDto.builder()
-                    .success(false)
-                    .message("Failed to initiate booking: " + e.getMessage())
-                    .errors(List.of(e.getMessage()))
-                    .build();
+            log.error("Error in booking initiation", e);
+            throw e; // Let retry service handle it
         }
     }
 
+    // UPDATED METHOD: Reserve seats with optimistic locking protection
+    private void reserveSeatsWithOptimisticLocking(Booking booking, List<Seat> seats) {
+        // Re-fetch show with latest version to ensure we have current data
+        Show show = showRepository.findById(booking.getShow().getShowId())
+                .orElseThrow(() -> new ShowNotFoundException("Show not found"));
+
+        log.info("Reserving {} seats for booking {} on show {} (version {})",
+                seats.size(), booking.getBookingReference(), show.getShowId(), show.getVersion());
+        // Check if seats are still available (double-check after version load)
+        if (show.getAvailableSeats() < seats.size()) {
+            throw new BookingNotPossibleException(
+                    "Only " + show.getAvailableSeats() + " seats available, requested " + seats.size()
+            );
+        }
+
+        // Update seat count - this will trigger optimistic locking check
+        updateShowSeatCountWithVersionCheck(show, seats.size(), true);
+    }
+
+    // UPDATED METHOD: Seat count update with version awareness
+    private void updateShowSeatCountWithVersionCheck(Show show, int seatCount, boolean isBooking) {
+        log.debug("Updating seat count for show {} (version {}): {} seats, isBooking: {}",
+                show.getShowId(), show.getVersion(), seatCount, isBooking);
+
+        try {
+            if (isBooking) {
+                show.bookSeats(seatCount);
+            } else {
+                show.releaseSeats(seatCount);
+            }
+
+            // This save() will check version and throw OptimisticLockingFailureException if conflict
+            Show savedShow = showRepository.save(show);
+
+            log.debug("Successfully updated show {} to version {}",
+                    savedShow.getShowId(), savedShow.getVersion());
+
+        } catch (OptimisticLockingFailureException ex) {
+            log.warn("Optimistic locking conflict while updating seat count for show {}", show.getShowId());
+            throw ex; // Re-throw to trigger retry
+        }
+    }
+
+    // ADD THIS: Enhanced payment processing with retry
     public PaymentResponseDto processPayment(PaymentRequestDto request) {
         log.info("Processing payment for booking: {}", request.getBookingReference());
 
+        return retryService.executeWithRetry(() -> {
+            return performPaymentProcessing(request);
+        }, "payment-processing");
+    }
+
+    private PaymentResponseDto performPaymentProcessing(PaymentRequestDto request) {
+        // Re-fetch booking with latest version
         Booking booking = findBookingByReference(request.getBookingReference());
 
         // Validate booking state
@@ -125,7 +298,7 @@ public class BookingService {
         // Process payment through mock service
         PaymentResponseDto paymentResponse = paymentService.processPaymentByMethod(request);
 
-        // Update booking with payment result
+        // Update booking with payment result (optimistic locking applies here too)
         booking.updatePaymentStatus(
                 paymentResponse.getPaymentStatus(),
                 paymentResponse.getPaymentReference(),
@@ -136,8 +309,10 @@ public class BookingService {
             booking.setPaymentMethod(request.getPaymentMethod());
             booking.confirmBooking();
 
-            // Update show seat count
-            updateShowSeatCount(booking.getShow(), booking.getNumberOfSeats(), true);
+            // Update show seat count with version check
+            Show show = showRepository.findById(booking.getShow().getShowId())
+                    .orElseThrow(() -> new ShowNotFoundException("Show not found"));
+            updateShowSeatCountWithVersionCheck(show, booking.getNumberOfSeats(), true);
 
             log.info("Payment successful for booking: {}", booking.getBookingReference());
         } else {
@@ -147,6 +322,7 @@ public class BookingService {
         bookingRepository.save(booking);
         return paymentResponse;
     }
+
 
     public BookingConfirmationResponseDto confirmBooking(String bookingReference) {
         log.info("Confirming booking: {}", bookingReference);
@@ -407,14 +583,16 @@ public class BookingService {
                 errors.add("Some seats are invalid or not found");
             }
 
-            // Check seat availability
-            List<Long> bookedSeatIds = bookingRepository.getBookedSeatIdsForShow(request.getShowId());
-            List<Long> unavailableSeats = request.getSeatIds().stream()
-                    .filter(bookedSeatIds::contains)
+            // UPDATED: Check seat availability INCLUDING PENDING bookings within expiry window
+            List<Long> unavailableSeatIds = bookingRepository.getUnavailableSeatIdsForShow(
+                    request.getShowId(), LocalDateTime.now());
+
+            List<Long> conflictingSeats = request.getSeatIds().stream()
+                    .filter(unavailableSeatIds::contains)
                     .collect(Collectors.toList());
 
-            if (!unavailableSeats.isEmpty()) {
-                errors.add("Some seats are already booked: " + unavailableSeats);
+            if (!conflictingSeats.isEmpty()) {
+                errors.add("Some seats are already booked or reserved: " + conflictingSeats);
             }
 
             // Validate user
@@ -437,7 +615,7 @@ public class BookingService {
                     .message(errors.isEmpty() ? "Validation successful" : "Validation failed")
                     .errors(errors)
                     .warnings(warnings)
-                    .seatsAvailable(unavailableSeats.isEmpty())
+                    .seatsAvailable(conflictingSeats.isEmpty())
                     .showBookable(show.canBeBooked())
                     .userEligible(user != null)
                     .estimatedAmount(errors.isEmpty() ? calculateEstimatedAmount(show, seats) : BigDecimal.ZERO)
