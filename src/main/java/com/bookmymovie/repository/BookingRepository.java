@@ -229,6 +229,13 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
             "AND bs.booking.status = 'CONFIRMED'")
     List<Long> getBookedSeatIdsForShow(@Param("showId") Long showId);
 
+    @Query("SELECT bs.seat.seatId FROM BookingSeat bs " +
+            "WHERE bs.booking.show.showId = :showId " +
+            "AND (bs.booking.status = 'CONFIRMED' " +
+            "     OR (bs.booking.status = 'PENDING' AND bs.booking.expiryTime > :currentTime))")
+    List<Long> getUnavailableSeatIdsForShow(@Param("showId") Long showId,
+                                            @Param("currentTime") LocalDateTime currentTime);
+
     @Query("SELECT bs.seat.rowLabel, bs.seat.seatNumber FROM BookingSeat bs " +
             "WHERE bs.booking.show.showId = :showId " +
             "AND bs.booking.status = 'CONFIRMED' " +

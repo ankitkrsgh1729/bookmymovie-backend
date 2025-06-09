@@ -1,18 +1,15 @@
 package com.bookmymovie.entity;
-import com.bookmymovie.constants.TheaterConstant;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.*;
 import lombok.*;
 import org.hibernate.annotations.SQLDelete;
 import org.hibernate.annotations.Where;
-
+import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.util.ArrayList;
-import java.util.List;
 
 
 @Entity
@@ -38,6 +35,12 @@ public class Show extends BaseEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "show_id")
     private Long showId;
+
+    // ADD THIS: Optimistic Locking Version Field
+    @Version
+    @Column(name = "version", nullable = false)
+    @Builder.Default
+    private Long version = 0L;
 
     @NotNull(message = "Movie is required")
     @ManyToOne(fetch = FetchType.LAZY)
