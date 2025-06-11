@@ -3,6 +3,7 @@ package com.bookmymovie.controller;
 import com.bookmymovie.dto.request.*;
 import com.bookmymovie.dto.response.*;
 import com.bookmymovie.service.BookingService;
+import com.bookmymovie.service.RedisDistributedLockService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,6 +22,7 @@ import java.util.List;
 public class BookingController {
 
     private final BookingService bookingService;
+    private final RedisDistributedLockService lockService;
 
     // ==================== BOOKING FLOW ENDPOINTS ====================
 
@@ -392,6 +394,55 @@ public class BookingController {
             this.code = code;
             this.message = message;
             this.timestamp = java.time.LocalDateTime.now().toString();
+        }
+    }
+
+
+
+
+
+
+
+    // ===================================== LOCKING STUDY =====================================
+
+    /**
+     * Distributed lock health check endpoint
+     */
+    @GetMapping("/health/distributed-lock")
+    public ResponseEntity<BookingService.DistributedLockHealthStatus> checkDistributedLockHealth() {
+
+        try {
+            BookingService.DistributedLockHealthStatus health =
+                    bookingService.getDistributedLockHealth();
+
+            HttpStatus status = health.isHealthy() ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE;
+            return ResponseEntity.status(status).body(health);
+
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(BookingService.DistributedLockHealthStatus
+                            .unhealthy("Health check failed: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Lock information endpoint for debugging
+     */
+    @GetMapping("/debug/lock-info/{lockKey}")
+    public ResponseEntity<RedisDistributedLockService.LockInfo> getLockInfo(@PathVariable String lockKey) {
+
+        try {
+            RedisDistributedLockService.LockInfo lockInfo =
+                    lockService.getLockInfo(lockKey);
+
+            return ResponseEntity.ok(lockInfo);
+
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(RedisDistributedLockService.LockInfo.builder()
+                            .lockKey(lockKey)
+                            .error("Failed to get lock info: " + e.getMessage())
+                            .build());
         }
     }
 }
