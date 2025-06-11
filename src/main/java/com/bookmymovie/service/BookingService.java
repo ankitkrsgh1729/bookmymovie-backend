@@ -1,5 +1,6 @@
 package com.bookmymovie.service;
 
+import com.bookmymovie.annotation.DistributedLock;
 import com.bookmymovie.constants.TheaterConstant;
 import com.bookmymovie.dto.request.*;
 import com.bookmymovie.dto.response.*;
@@ -28,6 +29,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -42,6 +44,7 @@ public class BookingService {
     private final SeatRepository seatRepository;
     private final UserRepository userRepository;
     private final MockPaymentService paymentService;
+    private final RedisDistributedLockService lockService;
 
     // Business configuration
     private static final BigDecimal CONVENIENCE_FEE_RATE = BigDecimal.valueOf(0.05); // 5%
@@ -50,129 +53,84 @@ public class BookingService {
 
     // ==================== CORE BOOKING OPERATIONS ====================
 
-//    public BookingInitiationResponseDto initiateBooking(BookingCreateRequestDto request) {
-//        log.info("Initiating booking for show {} with {} seats", request.getShowId(), request.getSeatIds().size());
-//
-//        try {
-//            // Validate booking request
-//            BookingValidationResponseDto validation = validateBookingRequest(request);
-//            if (!validation.getValid()) {
-//                return BookingInitiationResponseDto.builder()
-//                        .success(false)
-//                        .message("Booking validation failed")
-//                        .errors(validation.getErrors())
-//                        .build();
-//            }
-//
-//            // Load entities
-//            Show show = findShowById(request.getShowId());
-//            User user = findUserById(request.getUserId());
-//            List<Seat> seats = findSeatsByIds(request.getSeatIds());
-//
-//            // Calculate pricing
-//            BookingPricingResponseDto pricing = calculateBookingPricing(
-//                    BookingPricingRequestDto.builder()
-//                            .showId(request.getShowId())
-//                            .seatIds(request.getSeatIds())
-//                            .couponCode(request.getCouponCode())
-//                            .build()
-//            );
-//
-//            // Create booking entity
-//            Booking booking = createBookingEntity(request, show, user, seats, pricing);
-//            booking = bookingRepository.save(booking);
-//
-//            // Reserve seats temporarily
-//            reserveSeats(booking, seats);
-//
-//            log.info("Booking initiated successfully with reference: {}", booking.getBookingReference());
-//
-//            return BookingInitiationResponseDto.builder()
-//                    .success(true)
-//                    .message("Booking initiated successfully")
-//                    .bookingReference(booking.getBookingReference())
-//                    .bookingId(booking.getBookingId())
-//                    .expiryTime(booking.getExpiryTime())
-//                    .timeToExpiryMinutes(booking.getTimeToExpiry())
-//                    .finalAmount(booking.getFinalAmount())
-//                    .build();
-//
-//        } catch (Exception e) {
-//            log.error("Error initiating booking", e);
-//            return BookingInitiationResponseDto.builder()
-//                    .success(false)
-//                    .message("Failed to initiate booking: " + e.getMessage())
-//                    .errors(List.of(e.getMessage()))
-//                    .build();
-//        }
-//    }
-//
-//    public PaymentResponseDto processPayment(PaymentRequestDto request) {
-//        log.info("Processing payment for booking: {}", request.getBookingReference());
-//
-//        Booking booking = findBookingByReference(request.getBookingReference());
-//
-//        // Validate booking state
-//        if (!booking.canBeModified()) {
-//            throw new BookingNotModifiableException("Booking cannot be modified at this time");
-//        }
-//
-//        if (booking.isExpired()) {
-//            booking.expireBooking();
-//            bookingRepository.save(booking);
-//            throw new BookingExpiredException("Booking has expired");
-//        }
-//
-//        // Validate payment amount
-//        if (request.getPaymentAmount().compareTo(booking.getFinalAmount()) != 0) {
-//            throw new InvalidPaymentAmountException("Payment amount does not match booking amount");
-//        }
-//
-//        // Process payment through mock service
-//        PaymentResponseDto paymentResponse = paymentService.processPaymentByMethod(request);
-//
-//        // Update booking with payment result
-//        booking.updatePaymentStatus(
-//                paymentResponse.getPaymentStatus(),
-//                paymentResponse.getPaymentReference(),
-//                paymentResponse.getGatewayResponse()
-//        );
-//
-//        if (paymentResponse.getSuccess()) {
-//            booking.setPaymentMethod(request.getPaymentMethod());
-//            booking.confirmBooking();
-//
-//            // Update show seat count
-//            updateShowSeatCount(booking.getShow(), booking.getNumberOfSeats(), true);
-//
-//            log.info("Payment successful for booking: {}", booking.getBookingReference());
-//        } else {
-//            log.warn("Payment failed for booking: {}", booking.getBookingReference());
-//        }
-//
-//        bookingRepository.save(booking);
-//        return paymentResponse;
-//    }
-//}
 
     // UPDATED METHOD: Add optimistic locking retry
+    /**
+     * Flash sale booking with maximum protection
+     * Used for high-demand events like movie premieres, concerts, etc.
+     */
+    @DistributedLock(
+            key = "'flash-sale-show-' + #request.showId",
+            waitTime = 100,
+            leaseTime = 60000,
+            timeUnit = TimeUnit.MILLISECONDS,
+            errorMessage = "High demand detected! Please wait and try again."
+    )
+    @Transactional
     public BookingInitiationResponseDto initiateBooking(BookingCreateRequestDto request) {
         log.info("Initiating booking for show {} with {} seats", request.getShowId(), request.getSeatIds().size());
 
         return retryService.executeWithRetry(() -> {
             try {
                 return performBookingInitiation(request);
-            } catch (InterruptedException e) {
+            } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         }, "booking-initiation");
     }
 
+    /**
+     * Health check for distributed locking system
+     */
+    public DistributedLockHealthStatus getDistributedLockHealth() {
+        try {
+            String testKey = "health-check-" + System.currentTimeMillis();
+
+            RedisDistributedLockService.DistributedLockResult result =
+                    lockService.acquireLock(testKey, 100, 1000, TimeUnit.MILLISECONDS);
+
+            if (result.isSuccess()) {
+                lockService.releaseLock(result.getLock(), testKey);
+                return DistributedLockHealthStatus.healthy();
+            } else {
+                return DistributedLockHealthStatus.unhealthy("Lock acquisition failed: " + result.getErrorMessage());
+            }
+
+        } catch (Exception e) {
+            return DistributedLockHealthStatus.unhealthy("Health check failed: " + e.getMessage());
+        }
+    }
+
+    @lombok.Data
+    @lombok.Builder
+    public static class DistributedLockHealthStatus {
+        private boolean healthy;
+        private String message;
+        private long timestamp;
+
+        public static DistributedLockHealthStatus healthy() {
+            return DistributedLockHealthStatus.builder()
+                    .healthy(true)
+                    .message("Distributed locking system is operational")
+                    .timestamp(System.currentTimeMillis())
+                    .build();
+        }
+
+        public static DistributedLockHealthStatus unhealthy(String message) {
+            return DistributedLockHealthStatus.builder()
+                    .healthy(false)
+                    .message(message)
+                    .timestamp(System.currentTimeMillis())
+                    .build();
+        }
+    }
+
     // EXTRACTED METHOD: Core booking logic (for retry)
-    private BookingInitiationResponseDto performBookingInitiation(BookingCreateRequestDto request) throws InterruptedException {
+    private BookingInitiationResponseDto performBookingInitiation(BookingCreateRequestDto request) throws Exception {
         try {
             // Validate booking request
             BookingValidationResponseDto validation = validateBookingRequest(request);
+            Thread.sleep(50000);
             if (!validation.getValid()) {
                 return BookingInitiationResponseDto.builder()
                         .success(false)
@@ -182,7 +140,12 @@ public class BookingService {
             }
 
             // Load entities (this will load current version numbers)
-            Show show = findShowById(request.getShowId());
+            Show show = null;
+            if (request.getShowId() == 2) {
+                show = findByIdWithPessimisticLock(request.getShowId());
+            } else {
+                show = findShowById(request.getShowId());
+            }
             User user = findUserById(request.getUserId());
             List<Seat> seats = findSeatsByIds(request.getSeatIds());
 
@@ -200,13 +163,16 @@ public class BookingService {
 
             // Create booking entity
             Booking booking = createBookingEntity(request, show, user, seats, pricing);
-            booking = bookingRepository.save(booking);
 
             // Reserve seats with optimistic locking
             reserveSeatsWithOptimisticLocking(booking, seats);
 
+            booking = bookingRepository.save(booking);
+
             log.info("Booking initiated successfully with reference: {}", booking.getBookingReference());
 
+            // If we throw here. @Tranactional will revert all the db commits in the ongoing transaction i.e. current function or child functions db calls.
+//            throw new Exception("Simulated exception for testing @transactional annotation");
             return BookingInitiationResponseDto.builder()
                     .success(true)
                     .message("Booking initiated successfully")
@@ -959,6 +925,11 @@ public class BookingService {
 
     private Show findShowById(Long showId) {
         return showRepository.findById(showId)
+                .orElseThrow(() -> new ShowNotFoundException("Show not found with ID: " + showId));
+    }
+
+    private Show findByIdWithPessimisticLock(Long showId) {
+        return showRepository.findByIdWithPessimisticLock(showId)
                 .orElseThrow(() -> new ShowNotFoundException("Show not found with ID: " + showId));
     }
 

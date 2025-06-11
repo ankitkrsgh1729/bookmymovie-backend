@@ -28,6 +28,33 @@ spring:
       port: 6379
       timeout: 2000ms
 
+    # Connection pool settings
+    lettuce:
+      pool:
+        max-active: 10
+        max-idle: 8
+        min-idle: 2
+        max-wait: 2000ms
+
+# Redisson Configuration
+redisson:
+  config: |
+    singleServerConfig:
+      address: "redis://localhost:6379"
+      connectionPoolSize: 10
+      connectionMinimumIdleSize: 2
+      timeout: 3000
+      retryAttempts: 3
+      retryInterval: 1500
+
+# Distributed Lock Configuration
+distributed-lock:
+  default:
+    wait-time: 100          # Default wait time in milliseconds
+    lease-time: 5000        # Default lease time in milliseconds
+    retry-interval: 50      # Retry interval in milliseconds
+    max-retry-attempts: 3   # Maximum retry attempts
+
   # Security Configuration
   security:
     user:
