@@ -6,9 +6,9 @@ spring:
 
   # Database Configuration
   datasource:
-    url: jdbc:postgresql://bookmymovie.cpk04e8ai2r1.ap-south-1.rds.amazonaws.com:5432/postgres
+    url: jdbc:postgresql://bookmymovie.cpr1.ap-south-1.rds.amazonaws.com:5432/postgres
     username: postgres
-    password: dvSD99UMGaAHQTZmPpRB
+    password: dvSDpRB
     driver-class-name: org.postgresql.Driver
 
   # JPA Configuration
